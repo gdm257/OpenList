@@ -10,6 +10,7 @@ OpenList uses a **domain-driven layered architecture** with clear separation bet
 - **`drivers/`** - Pluggable storage driver implementations
 - **`pkg/`** - Reusable packages that may be imported externally
 - **`public/`** - Static assets and frontend embedding
+- **`wrapper/`** - Cross-compilation helpers for different architectures
 
 ## Directory Patterns
 
@@ -42,6 +43,11 @@ OpenList uses a **domain-driven layered architecture** with clear separation bet
 **Location**: `/public/`  
 **Purpose**: Static files and frontend SPA embedding  
 **Example**: `public/public.go` uses Go embed to include built frontend
+
+### Cross-Compilation Wrappers
+**Location**: `/wrapper/`  
+**Purpose**: Platform-specific compilation helpers for cross-compilation  
+**Example**: `zcc-arm64`, `zcxx-win7` scripts for different target architectures
 
 ## Naming Conventions
 
@@ -97,17 +103,34 @@ Business logic for file operations is abstracted in `internal/op/`:
 - `path.go` - Path utilities
 - Operations coordinate between drivers and database, handle caching
 
+### Specialized Subsystems (`internal/`)
+OpenList includes specialized subsystems for advanced functionality:
+- **`archive/`** - Archive file handling with support for multiple formats (ZIP, RAR, 7z, ISO9660)
+- **`fuse/`** - FUSE filesystem integration for mounting storage as local filesystems
+- **`offline_download/`** - Offline download management and queuing
+
 ### HTTP Handler Pattern
 Handlers in `server/handles/` receive Gin context, validate input, call operation layer, return JSON:
+- **File naming**: Resource-based (`user.go`, `storage.go`) not functional
+- **Error handling**: Use `common.ErrorResp()` for consistent error responses
+
 ```go
-func FsList(c *gin.Context) {
-    req := &ListReq{}
-    if err := c.ShouldBind(req); err != nil {
-        common.ErrorStrResp(c, err.Error(), 400)
+func ListUsers(c *gin.Context) {
+    var req model.PageReq
+    if err := c.ShouldBind(&req); err != nil {
+        common.ErrorResp(c, err, 400)
         return
     }
-    // ... call operation layer
-    common.SuccessResp(c, result)
+    req.Validate()
+    users, total, err := op.GetUsers(req.Page, req.PerPage)
+    if err != nil {
+        common.ErrorResp(c, err, 500, true)
+        return
+    }
+    common.SuccessResp(c, common.PageResp{
+        Content: users,
+        Total:   total,
+    })
 }
 ```
 
