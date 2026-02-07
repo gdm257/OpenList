@@ -1,0 +1,46 @@
+name: Sync from Upstream
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at UTC 00:00
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    name: Sync from upstream
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: upstream
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/OpenListTeam/OpenList.git
+          git fetch upstream
+
+      - name: Sync and push
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+          if git rev-parse --verify upstream/main >/dev/null 2>&1; then
+            LOCAL=$(git rev-parse upstream)
+            REMOTE=$(git rev-parse upstream/main)
+
+            if [ "$LOCAL" != "$REMOTE" ]; then
+              echo "New updates detected from upstream, syncing..."
+              git merge upstream/main --no-edit
+              git push origin upstream
+              echo "Sync completed"
+            else
+              echo "No new updates from upstream"
+            fi
+          else
+            echo "Initial sync, creating upstream branch..."
+            git checkout -b upstream
+            git push -u origin upstream
+            echo "upstream branch created"
+          fi
