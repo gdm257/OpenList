@@ -1,4 +1,4 @@
-# Logger Specification
+# Log Specification
 
 This document defines the logging standards and conventions for the OpenList project.
 
@@ -59,20 +59,7 @@ Use appropriate log levels based on the severity and context of the message:
 - **Error**: Log failures that affect a specific operation but not the entire application.
 - **Fatal/Panic**: Use sparingly. These terminate the application. Reserve for truly unrecoverable states.
 
-## Message Formatting
-
-### Structured Messages
-
-Use structured, descriptive messages with relevant context:
-
-```go
-// Good
-log.Errorf("failed to get storage details: storage_id=%s error=%v", storageID, err)
-
-// Avoid
-log.Errorf("failed")
-log.Errorf("error getting details: %+v", err)  // Too generic
-```
+## Log Message Patterns
 
 ### Format String Conventions
 
@@ -82,179 +69,6 @@ log.Errorf("error getting details: %+v", err)  // Too generic
 - Use `%+v` for detailed struct inspection
 - Use `%f` for floating-point numbers
 - Use `%t` for booleans
-
-### Key-Value Pairs
-
-For structured logging with key-value pairs:
-
-```go
-log.WithField("storage_id", storageID).
-    WithField("operation", "list").
-    Error("storage operation failed")
-```
-
-Or using `WithFields` for multiple fields:
-
-```go
-log.WithFields(log.Fields{
-    "storage_id": storageID,
-    "path":       path,
-    "action":     "upload",
-}).Error("storage operation failed")
-```
-
-## Error Logging
-
-### Error Context
-
-Always include sufficient context when logging errors:
-
-```go
-// Good - includes operation, resource, and error
-log.Errorf("failed to upload file: storage=%s path=%s error=%v", storageID, path, err)
-
-// Good - using structured fields
-log.WithField("storage_id", storageID).
-    WithField("file_path", path).
-    Error("upload failed")
-```
-
-### Error Wrapping
-
-Use error wrapping for stack traces when appropriate:
-
-```go
-log.Errorf("failed to process request: %+v", err)
-
-// For wrapped errors with context
-log.Errorf("database connection failed: %w", err)  // If using Go 1.20+ error wrapping
-```
-
-### Avoid Redundant Error Logging
-
-Don't log errors at multiple levels in the same call stack:
-
-```go
-// Avoid - double logging
-func A() error {
-    if err := B(); err != nil {
-        log.Error(err)  // Log here
-        return err      // Then return
-    }
-    return nil
-}
-
-func B() error {
-    if err := C(); err != nil {
-        log.Error(err)  // Don't log here too
-        return err
-    }
-    return nil
-}
-```
-
-Return errors up the stack and log at the appropriate level (typically at the handler or boundary).
-
-## Performance Considerations
-
-### Avoid Expensive Operations in Debug Logs
-
-```go
-// Avoid - %+v on large structures in debug
-log.Debugf("state: %+v", hugeStruct)
-
-// Better - log specific fields
-log.Debugf("items_count=%d memory=%d", len(items), memory)
-
-// Better - use structured fields
-log.WithField("items_count", len(items)).
-    WithField("memory", memory).
-    Debug("state snapshot")
-```
-
-### Conditional Debug Logging
-
-Use `IsDebugEnabled()` check for expensive debug operations:
-
-```go
-if log.IsLevelEnabled(log.DebugLevel) {
-    result := expensiveDebugOperation()
-    log.Debugf("result: %v", result)
-}
-```
-
-## Configuration
-
-Logging configuration is managed in `internal/bootstrap/log.go`:
-
-```go
-// Log level based on flags
-if flags.Debug || flags.Dev {
-    l.SetLevel(logrus.DebugLevel)
-    l.SetReportCaller(true)
-} else {
-    l.SetLevel(logrus.InfoLevel)
-    l.SetReportCaller(false)
-}
-
-// File rotation with lumberjack
-if logConfig.Enable {
-    w = &lumberjack.Logger{
-        Filename:   logConfig.Name,
-        MaxSize:    logConfig.MaxSize,
-        MaxBackups: logConfig.MaxBackups,
-        MaxAge:     logConfig.MaxAge,
-        Compress:   logConfig.Compress,
-    }
-}
-```
-
-### Standard Configuration Values
-
-- **Format**: Text with timestamp (`2006-01-02 15:04:05`)
-- **Default Level**: `Info` (production), `Debug` (development)
-- **Output**: stdout by default, file with rotation when configured
-- **Colors**: Enabled in development, configurable in production
-
-## Request Logging
-
-For HTTP request logging, use the middleware pattern:
-
-```go
-func RequestLogger() gin.HandlerFunc {
-    return gin.LoggerWithConfig(gin.LoggerConfig{
-        Output: log.StandardLogger().Out,
-        Skip:   skipFunc,
-    })
-}
-```
-
-Include request IDs for tracing:
-
-```go
-log.WithField("request_id", requestID).
-    Infof("request completed: method=%s path=%s status=%d", 
-        method, path, status)
-```
-
-## Driver Logging
-
-Storage drivers should use consistent logging patterns:
-
-```go
-// Driver initialization
-log.Infof("initializing driver: type=%s", driverType)
-
-// API operations
-log.Debugf("API request: endpoint=%s params=%v", endpoint, params)
-log.Warnf("rate limit warning: api=%s remaining=%d", api, remaining)
-
-// Errors with context
-log.Errorf("API error: endpoint=%s code=%d error=%v", 
-    endpoint, code, err)
-```
-
-## Log Message Patterns
 
 ### Success Messages
 
@@ -296,7 +110,32 @@ log.Errorf("storage error: id=%s error=%v", storageID, err)
 
 ## Anti-Patterns to Avoid
 
-### 1. Sensitive Data in Logs
+### Redundant Error Logging
+
+Don't log errors at multiple levels in the same call stack:
+
+```go
+// Avoid - double logging
+func A() error {
+    if err := B(); err != nil {
+        log.Error(err)  // Log here
+        return err      // Then return
+    }
+    return nil
+}
+
+func B() error {
+    if err := C(); err != nil {
+        log.Error(err)  // Don't log here too
+        return err
+    }
+    return nil
+}
+```
+
+Return errors up the stack and log at the appropriate level (typically at the handler or boundary).
+
+### Sensitive Data in Logs
 
 ```go
 // Never log passwords, tokens, or API keys
@@ -307,7 +146,7 @@ log.Infof("login attempt: username=%s success=%t",
     username, success)
 ```
 
-### 2. Inconsistent Error Messages
+### Inconsistent Error Messages
 
 ```go
 // Bad - inconsistent error messages
@@ -318,7 +157,7 @@ log.Error("failed") // What failed?
 log.Errorf("operation failed: reason=%s", reason)
 ```
 
-### 3. Logging Without Context
+### Logging Without Context
 
 ```go
 // Bad
@@ -329,7 +168,7 @@ log.Errorf("failed to process request: path=%s error=%v",
     path, err)
 ```
 
-### 4. Using Printf for Errors
+### Using Printf for Errors
 
 ```go
 // Bad - loses log level semantics
@@ -339,7 +178,40 @@ fmt.Printf("error: %v\n", err)
 log.Error(err)
 ```
 
-## Configuration File Integration
+## Configuration
+
+Logging configuration is managed in `internal/bootstrap/log.go`:
+
+```go
+// Log level based on flags
+if flags.Debug || flags.Dev {
+    l.SetLevel(logrus.DebugLevel)
+    l.SetReportCaller(true)
+} else {
+    l.SetLevel(logrus.InfoLevel)
+    l.SetReportCaller(false)
+}
+
+// File rotation with lumberjack
+if logConfig.Enable {
+    w = &lumberjack.Logger{
+        Filename:   logConfig.Name,
+        MaxSize:    logConfig.MaxSize,
+        MaxBackups: logConfig.MaxBackups,
+        MaxAge:     logConfig.MaxAge,
+        Compress:   logConfig.Compress,
+    }
+}
+```
+
+### Standard Configuration Values
+
+- **Format**: Text with timestamp (`2006-01-02 15:04:05`)
+- **Default Level**: `Info` (production), `Debug` (development)
+- **Output**: stdout by default, file with rotation when configured
+- **Colors**: Enabled in development, configurable in production
+
+### Configuration File Integration
 
 Log settings in `config.json`:
 
